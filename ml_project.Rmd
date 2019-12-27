@@ -1,0 +1,139 @@
+---
+title: "Personal activity classification project"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Description
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, the goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants and predict the manner in which people did the exercise. This is the "classe" variable in the training set. 
+
+## Data
+
+The training data for this project are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+## Data preprocess
+
+```{r}
+library(caret)
+
+trainingDS <- read.csv("pml-training.csv", stringsAsFactors = F)
+trainingDS$classe <- as.factor(trainingDS$classe)
+
+testingDS <- read.csv("pml-testing.csv", stringsAsFactors = F)
+
+dim(trainingDS)
+
+```
+
+Lets explore the data
+
+```{r}
+str(trainingDS)
+
+```
+
+As we can see, there are a lot of null values. Let's look at them a little bit closer. I will count all the null values and empty string by column, and put this values in *emptyVals* vector
+
+```{r}
+
+emptyVals <- c()
+cnames = colnames(trainingDS)
+for (n in 1:length(cnames)){emptyVals <- c(emptyVals, sum((is.na(trainingDS[ ,n]) | trainingDS[ ,n]=="")))}
+emptyVals[emptyVals!=0]
+
+```
+
+Looks like the number of columns has no meaning values at all. All the predictors, containing less then 5% of meaning values will be excluded from the model. Also exclude timing predictors, user name and training variable X also will be excluded
+
+```{r}
+perc95 <- dim(trainingDS)[1]*0.95
+lessperc5 <- emptyVals > perc95
+trainingDS1 <- subset(trainingDS, select=c(lessperc5 == 0))
+
+trainingDS1 <- subset(trainingDS1, select=-c(user_name, cvtd_timestamp, raw_timestamp_part_2, raw_timestamp_part_1, new_window, num_window, X))
+
+dim(trainingDS1)
+anyNA(trainingDS1)
+
+```
+
+No missed values in training dataset
+
+## Building a model
+
+Separating data to validating and training data sets. During experiments, i tried to separate data into classic proportions, 80/20, 70/30, but amount of data is so big, training process on some algorithms taks too much time on my waek hardware, so the number of models I could check on this data is very limited and the accuracy was pretty bad, even for passing a project quiz. I was expecting a good accurasy from RF model, but could not build it on 80% of test data. So i violated this rule and took 10% for testing data and 90% for the validating for RF.
+
+### Knn model
+
+```{r}
+set.seed(12321)
+inTrain <- createDataPartition(y=trainingDS1$classe, p=0.7, list=F)
+training <- trainingDS1[inTrain,]
+validating <- trainingDS1[-inTrain,]
+trctrl <- trainControl(method = "repeatedcv", number = 10, repeats = 3)
+knn_fit <- train(classe ~., data = training, method = "knn",
+                 trControl=trctrl,
+                 preProcess = c("center", "scale"),
+                 tuneLength = 10)
+pred_knn <- predict(knn_fit, validating)
+knn_acc <- confusionMatrix(pred_knn, validating$classe)$overall[1]
+knn_acc 
+```
+
+
+### SVM model
+
+```{r}
+set.seed(12321)
+svm_fit <- train(classe ~., data = training, method = "svmLinear")
+pred_svm <- predict(svm_fit, validating)
+svm_acc <- confusionMatrix(pred_svm, validating$classe)$overall[1]
+svm_acc
+```
+
+### RF Model
+
+RF model was built just at 10% of the data
+
+```{r}
+set.seed(12321)
+inTrainRF <- createDataPartition(y=trainingDS1$classe, p=0.1, list=F)
+trainingRF <- trainingDS1[inTrainRF,]
+validatingRF <- trainingDS1[-inTrainRF,]
+
+rf_fit <- train(classe~., data=trainingRF, method='rf')
+pred_rf <- predict(rf_fit, validatingRF)
+rf_acc <- confusionMatrix(pred_rf, validatingRF$classe)$overall[1]
+rf_acc
+```
+
+## Results
+
+I checked 3 models: KNN model, SVM Linear model and Random Forest. It is not correct to compare results, because this algorithms were run on the different training sets (70% for KNN and SVM and just 10% for RF), but inspite of this disballance, RF demotstrated very good accuracy on much bigger validation set.
+
+```{r}
+acc_df <- data.frame("Model"=c("knn", "svm", "rf"), 
+                     "Accuracy"=c(as.numeric(knn_acc),as.numeric(svm_acc), as.numeric(rf_acc)))
+p <- ggplot(data=acc_df, aes(x=Model, y=Accuracy)) +
+   geom_bar(stat="identity", fill="steelblue")+
+   theme_minimal()
+p
+```
+
+## Test prediction
+
+Predicted values with RF model
+
+```{r}
+
+predict(rf_fit, testingDS)
+
+```
